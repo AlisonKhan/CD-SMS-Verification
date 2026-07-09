@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SMS OTP Auto-Fill</title>
+
+<!-- PWA setup -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4a7c3a">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="OTP Fill">
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: #f4f7f2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 32px 28px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 6px;
+    color: #2c3e28;
+  }
+  p.sub {
+    font-size: 14px;
+    color: #6b7268;
+    margin: 0 0 24px;
+  }
+  .otp-boxes {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .otp-boxes input {
+    width: 44px;
+    height: 52px;
+    text-align: center;
+    font-size: 22px;
+    border: 2px solid #dde3d9;
+    border-radius: 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .otp-boxes input:focus {
+    border-color: #4a7c3a;
+  }
+  .status {
+    font-size: 13px;
+    min-height: 18px;
+    margin-bottom: 18px;
+    color: #4a7c3a;
+  }
+  .status.error { color: #c0392b; }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 10px;
+    background: #4a7c3a;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  button:disabled {
+    background: #b8c7b2;
+    cursor: not-allowed;
+  }
+  .listen-btn, .install-btn {
+    background: #fff;
+    color: #4a7c3a;
+    border: 2px solid #4a7c3a;
+  }
+  .install-btn {
+    display: none;
+  }
+  .hint {
+    font-size: 12px;
+    color: #9aa199;
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Verify your number</h1>
+  <p class="sub">Enter the 6-digit code sent via SMS</p>
+
+  <div class="otp-boxes" id="otpBoxes">
+    <input type="tel" maxlength="1" inputmode="numeric" autocomplete="one-time-code">
+    <input type="tel" maxlength="1" inputmode="numeric">
+    <input type="tel" maxlength="1" inputmode="numeric">
+    <input type="tel" maxlength="1" inputmode="numeric">
+    <input type="tel" maxlength="1" inputmode="numeric">
+    <input type="tel" maxlength="1" inputmode="numeric">
+  </div>
+
+  <div class="status" id="status">Waiting for SMS…</div>
+
+  <button id="verifyBtn" disabled>Verify</button>
+  <button class="listen-btn" id="listenBtn">📩 Listen for SMS again</button>
+  <button class="install-btn" id="installBtn">⬇ Install App</button>
+
+  <div class="hint">
+    Auto-read works on Android Chrome when the SMS contains a code<br>
+    and ends with: <code>@yourdomain.com #123456</code><br>
+    Otherwise, paste the code anywhere in the boxes to fill it in manually.
+  </div>
+</div>
+
+<script>
+const boxes = Array.from(document.querySelectorAll('.otp-boxes input'));
+const statusEl = document.getElementById('status');
+const verifyBtn = document.getElementById('verifyBtn');
+const listenBtn = document.getElementById('listenBtn');
+const installBtn = document.getElementById('installBtn');
+
+// --- box navigation ---
+boxes.forEach((box, i) => {
+  box.addEventListener('input', () => {
+    box.value = box.value.replace(/[^0-9]/g, '');
+    if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+    checkComplete();
+  });
+  box.addEventListener('keydown', (e) => {
+    if (e.key === 'Backspace' && !box.value && i > 0) boxes[i - 1].focus();
+  });
+});
+
+// --- paste support (fallback for any browser) ---
+boxes[0].addEventListener('paste', (e) => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  fillCode(text);
+});
+
+function fillCode(text) {
+  const digits = (text.match(/\d/g) || []).slice(0, boxes.length);
+  digits.forEach((d, i) => { boxes[i].value = d; });
+  if (digits.length) boxes[Math.min(digits.length, boxes.length) - 1].focus();
+  checkComplete();
+}
+
+function checkComplete() {
+  const code = boxes.map(b => b.value).join('');
+  const complete = code.length === boxes.length;
+  verifyBtn.disabled = !complete;
+  if (complete) {
+    statusEl.textContent = 'Code entered ✓';
+    statusEl.classList.remove('error');
+  }
+}
+
+verifyBtn.addEventListener('click', () => {
+  const code = boxes.map(b => b.value).join('');
+  statusEl.textContent = `Verifying ${code}…`;
+  // Hook up your real verification call here.
+});
+
+// --- WebOTP API: auto-read incoming SMS ---
+async function listenForOTP() {
+  if (!('OTPCredential' in window)) {
+    statusEl.textContent = 'Auto-read not supported on this browser. Paste code manually.';
+    statusEl.classList.add('error');
+    return;
+  }
+  try {
+    statusEl.textContent = 'Listening for SMS…';
+    statusEl.classList.remove('error');
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 60000);
+
+    const content = await navigator.credentials.get({
+      otp: { transport: ['sms'] },
+      signal: ac.signal
+    });
+
+    if (content && content.code) {
+      fillCode(content.code);
+      statusEl.textContent = 'Code auto-filled from SMS ✓';
+    }
+  } catch (err) {
+    statusEl.textContent = 'Stopped listening. Paste code manually if needed.';
+    statusEl.classList.add('error');
+  }
+}
+
+listenBtn.addEventListener('click', listenForOTP);
+window.addEventListener('load', listenForOTP);
+
+// --- PWA install prompt ---
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'block';
+});
+
+installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installBtn.style.display = 'none';
+});
+
+window.addEventListener('appinstalled', () => {
+  installBtn.style.display = 'none';
+});
+
+// --- Register service worker ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+
+</body>
+</html>
